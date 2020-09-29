@@ -1,0 +1,103 @@
+##R codes for Skewed Logit usint the nairobi infant data set 
+#these codes are already established well in literature
+#we apply methods published by Lee Mcdaniel et al, titled Fast Pure R Implementation of GEE:Application of the Matrix Package
+rm(list = ls())##clear data in memory
+options(scipen=999)#prevent output in scientific notation
+library(geeM)##conducting skewed logit for longitudinal data in R
+library(dplyr)##manipulating data files
+library(readxl)##reading excel files
+library(glogis)## for plotting the CDF of the LOGIT
+infant_data <- read_excel("C:/Users/user/Desktop/DataPlosPaper2/infant_data.xlsx")
+
+attach(infant_data_2)
+##score of sum of number of morbidities in the given month
+infant_data_1<- infant_data %>% rowwise(IDNUM, time)
+infant_data_2<-infant_data_1 %>% mutate(score_morb = sum(c(IFEVER,ICOUGH,IDIARHEA,BLOODYLV,VOMIT,IRRITABL,EARINFEC,
+                                                           HEATRASH,IORALULC,ITHRUSH,ISPLENOM,COLD,IPNEUM,GEVOMIT,
+                                                           DEHYDRAT,ICONJUNC,ISEPSIS,ILYMPHAD,STOOLBLD)))
+
+
+## divide the data into no morbidity score=0 and all morbidities score >=1
+###----------------------------------------------------morb_severe--------no.mob-[versus]low+mild+serious-----43% vs 57%
+infant_data_2$morb_severe<-ifelse(infant_data_2$score_morb>0,1,0)
+data_severe<-infant_data_2 %>% group_by(IDNUM,time,morb_severe) %>% summarise()
+
+table(data_severe$morb_severe)%>% addmargins()##43% vs 57% therefore there is some assymetry
+###----------output for table 1
+m1<-infant_data_2 %>% filter(time==1) 
+table(m1$bv,m1$morb_severe)
+m1<-infant_data_2 %>% filter(time==2) 
+table(m1$bv,m1$morb_severe)
+m1<-infant_data_2 %>% filter(time==3) 
+table(m1$bv,m1$morb_severe)
+m1<-infant_data_2 %>% filter(time==4) 
+table(m1$bv,m1$morb_severe)
+m1<-infant_data_2 %>% filter(time==5) 
+table(m1$bv,m1$morb_severe)
+m1<-infant_data_2 %>% filter(time==6) 
+w<-table(m1$bv,m1$morb_severe)
+
+#####codes for ploting the CDF with different symmetry values as shown FIG 1
+x <- -10:10
+plot(x, pglogis(x, shape = 2.5), lty = 4, lwd = 2, type = "l", col = "black", main = "CDF", ylab = "F(x)")
+lines(x, pglogis(x, shape = 1.5),lty = 3, lwd = 2)
+lines(x, pglogis(x, shape = 1),lty = 1, lwd = 2)
+lines(x, pglogis(x, shape = 0.5),lty = 2, lwd = 2)
+lines(x, pglogis(x, shape = 0.25),lty = 5, lwd = 2)
+legend("topleft", c("alpha=2.5", "alpha=1.5",
+                    "alpha=1","alpha=0.5","alpha=0.25"), lwd = 2,lty = c(4,3,1,2,5), bty =  "n")
+
+#######----------calculating skewness from the morb severity as the response
+##we run the following model using scobit(Skewed Logit) as the response
+mod_scobit<-glm(morb_severe~bv*time+male+BRESTFED+HIV_INFECTED+weight,
+                data=infant_data_2,vce=c(cluster,IDNUM),ntol=1e-3)
+###since the calculation of skewness are not well defined in the R software, we use the developed methods in stata
+#to achieve that we run the following code
+scobit morb_severe time weight brestfed male hiv_infected bv*time ,vce(cluster idnum) nrtol(1e-3)
+
+#Fast Pure R Implementation of GEE:Application of the Matrix Package, McDaniel specifies that K is known
+#we use the Skewed Logit to estimate the K
+#K>0 condition must be satisfied
+#models out put using Liang and Zeger GEE, as explained by  when k=1, then we have the logit
+
+##consider different correlaion structures, indepedent,unstructured, AR(1),M-dep,exchengable
+infant_data_3<-as.data.frame(infant_data_2)
+k <- 1
+linkfun <- function(p) {
+  log((p^(1/k))/(1 - p^(1/k)))
+}
+variance <- function(p) {
+  p * (1-p)
+}
+linkinv <- function(eta) {
+  (exp(eta)/(1 + exp(eta)))^k
+}
+mu.eta <- function(eta) {
+  k * (exp(eta))^(k-1) / (1 + exp(eta))^(k+1)
+}
+FunList <- list(linkfun, variance, linkinv, mu.eta)
+
+model_GEE<-geem(morb_severe~bv*time+male+BRESTFED+HIV_INFECTED+weight, 
+                data=infant_data_3,id=IDNUM,family = FunList,corstr="independence")
+summary(model_GEE)
+
+###-Skewed Logit model with K estimated as 0.9224
+k <-  0.9224
+linkfun <- function(p) {
+  log((p^(1/k))/(1 - p^(1/k)))
+}
+variance <- function(p) {
+  p * (1-p)
+}
+linkinv <- function(eta) {
+  (exp(eta)/(1 + exp(eta)))^k
+}
+mu.eta <- function(eta) {
+  k * (exp(eta))^(k-1) / (1 + exp(eta))^(k+1)
+}
+FunList <- list(linkfun, variance, linkinv, mu.eta)
+
+model_SL_GEE<-geem(morb_severe~bv*time+male+BRESTFED+HIV_INFECTED+weight, 
+                 data=infant_data_3,id=IDNUM,family = FunList,corstr="independence")
+summary(model_SL_GEE)
+
